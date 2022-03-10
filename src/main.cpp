@@ -4,16 +4,21 @@
 #include <WiFiManager.h> //https://github.com/tzapu/WiFiManager
 #include <ArduinoWebsockets.h>
 #include <ArduinoJson.h>
+#include <Servo.h>
 #include "hoverhack.h"
 
-const char *websockets_server_host = "192.168.42.21"; // Enter server adress
-const uint16_t websockets_server_port = 8081;         // Enter server port
+const char *websockets_server_host = "vps.leolurch.de"; // Enter server adress
+const uint16_t websockets_server_port = 8081;           // Enter server port
 
 using namespace websockets;
 
 WebsocketsClient client;
 
-int dir = 1;
+Servo headServo;
+Servo fireServo;
+int fireServoDirection = 1;
+int fireServoMidpoint = 1500;
+int fireDuration = 2000;
 
 DynamicJsonDocument doc(1024);
 
@@ -22,17 +27,24 @@ void onMessageCallback(WebsocketsMessage message)
   client.send("Recieved 1 msg lul." + message.data());
   deserializeJson(doc, message.data());
 
+  const boolean drive = doc["w"];
   const int speed = doc["s"];
   const int dir = doc["d"];
-  const int angle = doc["a"];
   const int duration = doc["t"];
   const boolean fire = doc["f"];
+  const int fServoCalibration = doc["c"];
+  const int fServoDirection = doc["l"];
+  const int fDuration = doc["e"];
+  const boolean moveHead = doc["h"];
+  const int angle = doc["a"];
 
-  if (fire)
+  if (moveHead && angle >= 0 && angle <= 2000)
   {
-    client.send("fire");
+    headServo.writeMicroseconds(500 + angle);
+    client.send("Heading to " + String(angle));
   }
-  else if (speed >= -1000 && speed <= 1000 && dir >= -1000 && dir <= 1000 && angle >= 0 && angle <= 1000)
+
+  if (drive && speed >= -1000 && speed <= 1000 && dir >= -1000 && dir <= 1000)
   {
     client.send("Speeding with " + String(speed) + " for " + String(duration) + "ms while looking to " + String(dir) + " aming at " + String(angle) + " ;)" + String(dir > 0));
 
@@ -43,6 +55,35 @@ void onMessageCallback(WebsocketsMessage message)
     hoverhack::hoverSend(0, 0);
     delay(20);
     hoverhack::hoverSend(0, 0);
+  }
+
+  if (fServoCalibration >= 1000 && fServoCalibration <= 2000)
+  {
+    fireServoMidpoint = fServoCalibration;
+
+    client.send("Set fire servo midpoint to " + String(fireServoMidpoint));
+  }
+
+  if (fServoDirection == 1 || fServoDirection == -1)
+  {
+    fireServoDirection = fServoDirection;
+
+    client.send("Set fire servo direction to " + String(fireServoDirection));
+  }
+
+  if (fDuration > 0)
+  {
+    fireDuration = fDuration;
+    client.send("Set fire duration " + String(fireDuration));
+  }
+
+  if (fire)
+  {
+    fireServo.writeMicroseconds(fireServoDirection == 1 ? 1000 : 2000);
+    delay(fireDuration);
+    fireServo.writeMicroseconds(fireServoMidpoint);
+
+    client.send("fired!");
   }
 }
 
@@ -68,8 +109,11 @@ void onEventsCallback(WebsocketsEvent event, String data)
 
 void setup()
 {
-  // put your setup code here, to run once:
   Serial.begin(9600);
+
+  headServo.attach(D1);
+  fireServo.attach(D3);
+  fireServo.writeMicroseconds(fireServoMidpoint);
 
   // WiFiManager
   // Local intialization. Once its business is done, there is no need to keep it around
@@ -102,7 +146,7 @@ void setup()
   client.connect(websockets_server_host, websockets_server_port, "/");
 
   // Send a message
-  client.send("Hello Server");
+  client.send("UmVzcGVrdCEgTm9jaCBrcmFzc2VyIGthbm5zdCBkdSBudXIgbm9jaCBtaXQgYmF1YnVtbXMgTWVyY2ggd2VyZGVuLg== --silent");
 
   // Send a ping
   client.ping();
